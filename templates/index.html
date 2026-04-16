@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Harmonizer — Automatyczna Harmonizacja</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  <script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@1.8.9/build/opensheetmusicdisplay.min.js"></script>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div class="hero__badge">♪ Harmonizer</div>
+      <h1>Automatyczna Harmonizacja Melodii</h1>
+      <p class="hero__subtitle">Wgraj plik MusicXML, wybierz styl harmonizacji i w razie potrzeby dopracuj jego charakter w trybie zaawansowanym.</p>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="alerts">
+          {% for category, msg in messages %}
+            <div class="alert alert--{{ category }}">{{ msg }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <section class="card">
+      <h2>Wgraj i Skonfiguruj</h2>
+      <form method="post" enctype="multipart/form-data" class="form" id="mainForm">
+        <input type="hidden" name="existing_upload" value="{{ form_state.existing_upload }}" />
+        <input type="hidden" name="current_filename" value="{{ form_state.current_filename }}" />
+
+        {# ---- File upload (drag & drop) ---- #}
+        <div class="upload-zone" id="uploadZone">
+          <div class="upload-zone__icon">📄</div>
+          <div class="upload-zone__text">
+            <strong>Przeciągnij plik MusicXML tutaj</strong>
+            <span>
+              {% if form_state.current_filename %}
+              Aktualny plik: {{ form_state.current_filename }}. Kliknij, aby podmienić, albo zostaw i generuj ponownie.
+              {% else %}
+              lub kliknij, aby wybrać plik (.mxl / .musicxml / .xml)
+              {% endif %}
+            </span>
+          </div>
+          <input id="musicxml" name="musicxml" type="file" accept=".mxl,.musicxml,.xml" {% if not form_state.existing_upload %}required{% endif %} class="upload-zone__input" />
+          <div class="upload-zone__filename" id="uploadFilename"></div>
+        </div>
+
+        {# ---- Presets ---- #}
+        <div class="section-label">Styl bazowy</div>
+        <div class="preset-cards">
+          {% for key, info in preset_info.items() %}
+          {% if info.visible is not defined or info.visible %}
+          <label class="preset-card">
+            <input type="radio" name="preset" value="{{ key }}" {{ 'checked' if key == form_state.preset }} />
+            <div class="preset-card__inner">
+              <div class="preset-card__icon">{{ info.icon if info.icon is defined else '🎼' }}</div>
+              <div class="preset-card__title">{{ info.name }}</div>
+              <div class="preset-card__desc">{{ info.description }}</div>
+            </div>
+          </label>
+          {% endif %}
+          {% endfor %}
+        </div>
+        <p class="hint">Preset ustawia bazowy charakter harmonizacji. Po jego zmianie poniższe parametry wracają do ustawień tego stylu.</p>
+
+        {# ---- Core Controls ---- #}
+        {% set summary_labels = {
+          'harmonic_rhythm': 'Rytm',
+          'melody_priority': 'Melodia',
+          'harmonic_color': 'Kolor',
+          'cadence_pull': 'Kadencje',
+          'voice_motion': 'Ruch'
+        } %}
+        <details class="advanced advanced--controls" id="coreControlsPanel">
+          <summary>
+            <span class="advanced__icon">🎛</span>
+            <span>Główne parametry</span>
+            <div class="advanced__meta" id="coreSummaryPills">
+              {% for field, info in core_control_info.items() %}
+                {% for option in info.options %}
+                  {% if option.value == form_state[field] %}
+                  <span class="summary-pill">{{ summary_labels[field] }}: {{ option.label }}</span>
+                  {% endif %}
+                {% endfor %}
+              {% endfor %}
+            </div>
+            <span class="advanced__arrow">▸</span>
+          </summary>
+          <div class="advanced__body">
+            <div class="core-controls">
+              {% for field, info in core_control_info.items() %}
+              <section class="control-card">
+                <div class="control-card__top">
+                  <div class="control-card__title">{{ info.label }}</div>
+                  <details class="param-info">
+                    <summary class="param-info__toggle">ⓘ</summary>
+                    <div class="param-info__text">{{ info.hint }}</div>
+                  </details>
+                </div>
+                <div class="segmented-options">
+                  {% for option in info.options %}
+                  <label class="segment-option">
+                    <input
+                      type="radio"
+                      name="{{ field }}"
+                      value="{{ option.value }}"
+                      {% if form_state[field] == option.value %}checked{% endif %}
+                    />
+                    <span class="segment-option__inner">
+                      <strong>{{ option.label }}</strong>
+                      <small>{{ option.description }}</small>
+                    </span>
+                  </label>
+                  {% endfor %}
+                </div>
+              </section>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        {# ---- Key Selection ---- #}
+        <div class="section-label">Tonacja</div>
+        <div class="expert-inline">
+          <div class="expert-inline__row">
+            <div class="expert-inline__label">
+              <strong>{{ key_control_info.key_mode.label }}</strong>
+              <details class="param-info">
+                <summary class="param-info__toggle">ⓘ</summary>
+                <div class="param-info__text">{{ key_control_info.key_mode.hint }}</div>
+              </details>
+            </div>
+            <select name="key_mode" id="key_mode" class="mini-select">
+              {% for option in key_control_info.key_mode.options %}
+              <option value="{{ option.value }}" {% if form_state.key_mode == option.value %}selected{% endif %}>
+                {{ option.label }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div id="manualKeyBlock" {% if form_state.key_mode != 'manual' %}style="display:none"{% endif %}>
+            <div class="expert-inline__row">
+              <div class="expert-inline__label">
+                <strong>Tonika</strong>
+                <details class="param-info">
+                  <summary class="param-info__toggle">ⓘ</summary>
+                  <div class="param-info__text">Dotyczy tylko ręcznego wyboru tonacji.</div>
+                </details>
+              </div>
+              <select name="manual_tonic" id="manual_tonic" class="mini-select">
+                <option value="" {% if not form_state.manual_tonic %}selected{% endif %}>-- wybierz --</option>
+                {% for tonic in ['C','C#','Db','D','Eb','E','F','F#','Gb','G','Ab','A','Bb','B'] %}
+                <option value="{{ tonic }}" {% if form_state.manual_tonic == tonic %}selected{% endif %}>{{ tonic }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="expert-inline__row">
+              <div class="expert-inline__label">
+                <strong>{{ key_control_info.manual_mode.label }}</strong>
+                <details class="param-info">
+                  <summary class="param-info__toggle">ⓘ</summary>
+                  <div class="param-info__text">{{ key_control_info.manual_mode.hint }}</div>
+                </details>
+              </div>
+              <select name="manual_mode" id="manual_mode" class="mini-select">
+                {% for option in key_control_info.manual_mode.options %}
+                <option value="{{ option.value }}" {% if form_state.manual_mode == option.value %}selected{% endif %}>
+                  {{ option.label }}
+                </option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {# ---- Voice Configuration ---- #}
+        <div class="section-label">Głosy</div>
+        <div class="voices-config">
+          <label class="toggle-card">
+            <input type="checkbox" name="voices" id="voicesToggle" {% if form_state.voices %}checked{% endif %} />
+            <div class="toggle-card__inner">
+              <div class="toggle-card__switch">
+                <div class="toggle-track"><div class="toggle-knob"></div></div>
+              </div>
+              <div class="toggle-card__text">
+                <strong>Generuj głosy akompaniamentu</strong>
+                <span>2 dodatkowe głosy pod melodią (tenor + bas)</span>
+              </div>
+            </div>
+          </label>
+        </div>
+
+        {# ---- Output options ---- #}
+        <div class="section-label">Wyjście</div>
+        <div class="output-options">
+          <label class="check-pill">
+            <input type="checkbox" name="chords" {% if form_state.chords %}checked{% endif %} />
+            <span class="check-pill__box"></span>
+            <span>Symbole akordów</span>
+          </label>
+          <label class="check-pill">
+            <input type="checkbox" name="pdf" {% if form_state.pdf %}checked{% endif %} />
+            <span class="check-pill__box"></span>
+            <span>Eksport PDF</span>
+          </label>
+        </div>
+
+        {# ---- Compact Expert Controls ---- #}
+        <div class="section-label">Dodatkowe</div>
+        <div class="expert-inline">
+          {% for field, info in expert_control_info.items() %}
+          <div class="expert-inline__row">
+            <div class="expert-inline__label">
+              <strong>{{ info.label }}</strong>
+              <details class="param-info">
+                <summary class="param-info__toggle">ⓘ</summary>
+                <div class="param-info__text">{{ info.hint }}</div>
+              </details>
+            </div>
+            <select name="{{ field }}" id="{{ field }}" class="mini-select">
+              {% for option in info.options %}
+              <option value="{{ option.value }}" {% if form_state[field] == option.value %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% endfor %}
+          <button type="button" class="btn btn--ghost" onclick="applyPresetDefaults()">↺ Ustaw jak w stylu</button>
+        </div>
+
+        <button class="btn btn--primary btn--large" type="submit" id="submitBtn">
+          <span class="btn__icon">🎹</span>
+          <span>Generuj</span>
+        </button>
+      </form>
+    </section>
+
+    {% if result %}
+    <section class="card card--preview">
+      <h2>Wynik Harmonizacji</h2>
+      <p class="preview__info">
+        Główny podgląd jest renderowany bezpośrednio z wygenerowanego pliku
+        <strong>MusicXML</strong>. Jeśli eksport PDF się powiedzie, zobaczysz go niżej.
+      </p>
+
+      {% if piece_data %}
+      <div class="info-grid">
+        <div class="info-cell">
+          <div class="info-cell__label">Tytuł</div>
+          <div class="info-cell__value">{{ piece_data.title }}</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell__label">Tonacja</div>
+          <div class="info-cell__value">{{ piece_data.key }}</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell__label">Metrum</div>
+          <div class="info-cell__value">{{ piece_data.time_sig }}</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell__label">Takty</div>
+          <div class="info-cell__value">{{ piece_data.n_measures }}</div>
+        </div>
+        {% if config_used %}
+        <div class="info-cell">
+          <div class="info-cell__label">Preset</div>
+          <div class="info-cell__value">{{ config_used.preset }}</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell__label">Wybór tonacji</div>
+          <div class="info-cell__value">{{ config_used.key_choice }}</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell__label">Rytm harmoniczny</div>
+          <div class="info-cell__value">{{ config_used.harmonic_rhythm }}</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell__label">Melodia</div>
+          <div class="info-cell__value">{{ config_used.melody_priority }}</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell__label">Kolor</div>
+          <div class="info-cell__value">{{ config_used.harmonic_color }}</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell__label">Kadencje</div>
+          <div class="info-cell__value">{{ config_used.cadence_pull }}</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell__label">Ruch</div>
+          <div class="info-cell__value">{{ config_used.voice_motion }}</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell__label">Paleta</div>
+          <div class="info-cell__value">{{ config_used.complexity }}</div>
+        </div>
+        {% if config_used.voices %}
+        <div class="info-cell">
+          <div class="info-cell__label">Głosy</div>
+          <div class="info-cell__value">✓ 2 dodatkowe</div>
+        </div>
+        {% endif %}
+        {% endif %}
+        {% if piece_data.rhythm_stats %}
+        <div class="info-cell">
+          <div class="info-cell__label">Slotów</div>
+          <div class="info-cell__value">{{ piece_data.rhythm_stats.total_slots }}</div>
+        </div>
+        <div class="info-cell">
+          <div class="info-cell__label">Akordów / takt</div>
+          <div class="info-cell__value">{{ piece_data.rhythm_stats.avg_per_bar }}</div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if result.musicxml %}
+      <div class="section-block">
+        <h3>🎼 Podgląd MusicXML</h3>
+        <div class="score-preview" id="scorePreview">
+          <div class="score-loading" id="scoreLoading">
+            <div class="spinner"></div>
+            <span>Renderowanie partytury...</span>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if result.pdf %}
+      <div class="section-block">
+        <h3>📄 Podgląd PDF</h3>
+        <div class="pdf-embed">
+          <iframe src="{{ url_for('preview', filename=result.pdf.split('/')[-1]) }}"
+                  type="application/pdf" frameborder="0"></iframe>
+        </div>
+      </div>
+      {% else %}
+      <p class="note">
+        PDF nie został wygenerowany. Podgląd i pobieranie pliku MusicXML są nadal dostępne.
+      </p>
+      {% endif %}
+
+      <div class="downloads-bar">
+        {% if result.musicxml %}
+          <a class="btn btn--secondary" href="{{ url_for('download', filename=result.musicxml.split('/')[-1]) }}">
+            📥 Pobierz MusicXML
+          </a>
+        {% endif %}
+        {% if result.pdf %}
+          <a class="btn btn--secondary" href="{{ url_for('download', filename=result.pdf.split('/')[-1]) }}">
+            📥 Pobierz PDF
+          </a>
+        {% endif %}
+        <a href="{{ url_for('index') }}" class="btn btn--ghost">↺ Wyczyść wynik</a>
+      </div>
+    </section>
+
+    {% if log_text %}
+    <section class="card card--log">
+      <details>
+        <summary><h3 style="display:inline">📋 Szczegółowy Log</h3></summary>
+        <pre class="log">{{ log_text }}</pre>
+      </details>
+    </section>
+    {% endif %}
+    {% endif %}
+  </main>
+
+  <script>
+    // ---- Drag & Drop Upload ----
+    const zone = document.getElementById('uploadZone');
+    const fileInput = document.getElementById('musicxml');
+    const filenameDisplay = document.getElementById('uploadFilename');
+    const currentFilename = {{ form_state.current_filename | tojson }};
+
+    if (zone) {
+      function showFilename(name) {
+        filenameDisplay.textContent = name;
+        filenameDisplay.style.display = 'block';
+        zone.classList.add('upload-zone--has-file');
+      }
+
+      zone.addEventListener('click', () => fileInput.click());
+      zone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        zone.classList.add('upload-zone--drag');
+      });
+      zone.addEventListener('dragleave', () => {
+        zone.classList.remove('upload-zone--drag');
+      });
+      zone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        zone.classList.remove('upload-zone--drag');
+        if (e.dataTransfer.files.length) {
+          fileInput.files = e.dataTransfer.files;
+          showFilename(e.dataTransfer.files[0].name);
+        }
+      });
+      fileInput.addEventListener('change', () => {
+        if (fileInput.files.length) showFilename(fileInput.files[0].name);
+      });
+      if (currentFilename) showFilename(currentFilename);
+    }
+
+    const presetDefaults = {{ preset_form_defaults | tojson }};
+    const coreControlInfo = {{ core_control_info | tojson }};
+    const coreSummaryLabels = {
+      harmonic_rhythm: 'Rytm',
+      melody_priority: 'Melodia',
+      harmonic_color: 'Kolor',
+      cadence_pull: 'Kadencje',
+      voice_motion: 'Ruch',
+    };
+
+    function getSelectedPreset() {
+      const selected = document.querySelector('input[name="preset"]:checked');
+      return selected ? selected.value : null;
+    }
+
+    function setFieldValue(inputName, value) {
+      const radios = document.querySelectorAll(`input[name="${inputName}"][type="radio"]`);
+      if (radios.length) {
+        radios.forEach((radio) => {
+          radio.checked = radio.value === value;
+        });
+        return;
+      }
+
+      const el = document.querySelector(`[name="${inputName}"]`);
+      if (el) {
+        el.value = value;
+      }
+    }
+
+    function toggleManualKeyBlock() {
+      const keyModeEl = document.getElementById('key_mode');
+      const manualBlock = document.getElementById('manualKeyBlock');
+      if (!keyModeEl || !manualBlock) return;
+      manualBlock.style.display = keyModeEl.value === 'manual' ? '' : 'none';
+    }
+
+    function applyPresetDefaults() {
+      const presetName = getSelectedPreset();
+      const defaults = presetName ? presetDefaults[presetName] : null;
+      if (!defaults) return;
+
+      Object.entries(defaults).forEach(([inputName, value]) => {
+        setFieldValue(inputName, value);
+      });
+
+      toggleManualKeyBlock();
+      refreshCoreSummary();
+    }
+
+    function refreshCoreSummary() {
+      const container = document.getElementById('coreSummaryPills');
+      if (!container) return;
+
+      const pills = Object.entries(coreControlInfo).map(([field, info]) => {
+        const selected = document.querySelector(`input[name="${field}"]:checked`);
+        const option = info.options.find((item) => item.value === (selected ? selected.value : ''));
+        if (!option) return '';
+        const label = coreSummaryLabels[field] || info.label;
+        return `<span class="summary-pill">${label}: ${option.label}</span>`;
+      }).filter(Boolean);
+
+      container.innerHTML = pills.join('');
+    }
+
+    document.querySelectorAll('input[name="preset"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        applyPresetDefaults();
+      });
+    });
+
+    Object.keys(coreControlInfo).forEach((field) => {
+      document.querySelectorAll(`input[name="${field}"]`).forEach((input) => {
+        input.addEventListener('change', refreshCoreSummary);
+      });
+    });
+
+    const keyModeEl = document.getElementById('key_mode');
+    if (keyModeEl) {
+      keyModeEl.addEventListener('change', toggleManualKeyBlock);
+      toggleManualKeyBlock();
+    }
+
+    refreshCoreSummary();
+
+    // ---- Loading state on submit ----
+    const mainForm = document.getElementById('mainForm');
+    if (mainForm) {
+      mainForm.addEventListener('submit', () => {
+        const btn = document.getElementById('submitBtn');
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = '<span class="spinner-inline"></span> Harmonizuję...';
+        }
+      });
+    }
+
+    // ---- OSMD Score Preview ----
+    {% if result and result.musicxml %}
+    document.addEventListener('DOMContentLoaded', async () => {
+      const container = document.getElementById('scorePreview');
+      const loading = document.getElementById('scoreLoading');
+      if (!container || typeof opensheetmusicdisplay === 'undefined') {
+        if (loading) loading.innerHTML = '<span style="color:var(--muted)">Podgląd partytury niedostępny</span>';
+        return;
+      }
+      try {
+        const osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay(container, {
+          autoResize: true,
+          drawTitle: true,
+          drawSubtitle: false,
+          drawComposer: false,
+          drawCredits: false,
+          drawPartNames: true,
+          drawPartAbbreviations: false,
+        });
+        const xmlUrl = "{{ url_for('preview', filename=result.musicxml.split('/')[-1]) }}";
+        await osmd.load(xmlUrl);
+        osmd.render();
+        if (loading) loading.style.display = 'none';
+      } catch (err) {
+        console.error('OSMD error:', err);
+        if (loading) loading.innerHTML = '<span style="color:var(--muted)">Nie udało się wyrenderować partytury</span>';
+      }
+    });
+    {% endif %}
+  </script>
+</body>
+</html>

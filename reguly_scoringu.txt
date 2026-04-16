@@ -1,0 +1,131 @@
+Reguły scoringu w algorytmie harmonizacji
+
+1. Zgodność z melodią
+Dla każdej nuty w slocie sprawdzane jest, czy należy do akordu i czy leży na mocnej części taktu.
+
+Reguły:
+- nuta akordowa na mocnej części taktu: +16
+- nuta akordowa na słabej części taktu: +6
+- nuta nieakordowa na mocnej części taktu: -16
+- nuta nieakordowa na słabej części taktu: -3
+
+To jest obecnie najsilniejsza warstwa scoringu.
+
+2. Zgodność z planem frazowym / kadencyjnym
+Jeżeli dla danego slotu planner wyznaczył oczekiwanie (SlotPlanExpectation), kandydat dostaje premię za zgodność z tym planem.
+
+Reguły:
+- zgodność funkcji harmonicznej z oczekiwaną:
+  +4 × weight / 4
+- zgodność stopnia harmonicznego z oczekiwanym:
+  +6 × weight / 4
+
+Czyli realna premia zależy od wagi expectation ustawionej przez planner.
+
+3. Pozycja formalna slotu
+Scoring uwzględnia specjalne miejsca w formie.
+
+Reguły:
+- początek frazy i tonika: +4
+- koniec frazy i tonika: +8
+- koniec całego utworu i tonika: +15
+- slot oznaczony jako pre_end i funkcja dominantowa: +7
+
+Czyli algorytm lubi:
+- zaczynać frazę od T,
+- kończyć frazę od T,
+- przed końcem frazy mieć D,
+- na końcu utworu bardzo mocno preferuje T.
+
+4. Przejścia funkcyjne między kolejnymi akordami
+Patrzy na poprzedni akord, a czasem też dwa poprzednie.
+
+Dobre przejścia:
+- T -> S
+- T -> D
+- S -> D
+- D -> T
+- S -> T
+
+Każde z nich daje: +3
+
+Złe przejście:
+- D -> S
+
+Daje: -4
+
+Premia za kierunek dwuetapowy:
+- T -> S -> D : +1.5
+- S -> D -> T : +1.5
+
+Czyli algorytm premiuje klasyczne następstwa funkcyjne.
+
+5. Różnorodność / unikanie powtórzeń
+Jeśli akord się powtarza, dostaje karę.
+
+Reguły:
+- dokładnie ten sam akord symbolicznie co poprzedni: -3
+- ta sama funkcja harmoniczna co poprzednio: -1
+
+To ma ograniczać zbyt statyczny przebieg.
+
+6. Kolor harmoniczny / akordy niediatoniczne
+Patrzy na color_role.
+
+Reguły:
+- jeśli kandydat jest diatonic: 0
+- jeśli kandydat nie jest diatoniczny i:
+  - dozwolone są borrowed chords albo profil koloru to classic / rich: +1
+  - w przeciwnym razie: -3
+
+Czyli niediatoniczność nie jest całkiem zabroniona, ale zależy od konfiguracji.
+
+Profile konfiguracji zmieniają wagi
+
+melody profile
+strict
+- melody_fit_strong: 19
+- melody_nonfit_strong: -20
+- melody_nonfit_weak: -5
+
+flexible
+- melody_fit_strong: 13
+- melody_nonfit_strong: -11
+- melody_nonfit_weak: -2
+
+cadence profile
+light
+- phrase_end_tonic: 6
+- piece_end_tonic: 12
+- pre_end_dominant: 5
+
+strong
+- phrase_end_tonic: 10
+- piece_end_tonic: 18
+- pre_end_dominant: 9
+
+variety profile
+stable
+- repeat_same_chord: -1.5
+- same_function_repeat: -0.5
+
+active
+- repeat_same_chord: -5
+- same_function_repeat: -2
+
+color profile
+classic
+- borrowed_penalty: -2
+
+rich
+- borrowed_penalty: -1
+- borrowed_bonus: +2
+
+Wniosek do pracy
+Scoring można opisać jako sumę sześciu kryteriów:
+1. zgodność akordu z melodią,
+2. zgodność z planem formalnym,
+3. preferencje wynikające z pozycji slotu w formie,
+4. jakość przejścia funkcyjnego względem poprzednich akordów,
+5. kontrola różnorodności harmonicznej,
+6. kontrola udziału akordów niediatonicznych.
